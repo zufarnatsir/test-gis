@@ -1,103 +1,141 @@
-import Image from "next/image";
+// app/page.tsx
+"use client";
 
-export default function Home() {
+import { useState, useEffect } from "react";
+import { io, Socket } from "socket.io-client";
+import dynamic from "next/dynamic"; // Impor untuk dynamic import
+
+// Lakukan dynamic import untuk komponen peta dengan menonaktifkan SSR
+const TripMap = dynamic(() => import("../components/TripMap"), {
+  ssr: false,
+  loading: () => <p>Memuat Peta...</p>,
+});
+
+interface LocationData {
+  tripId: string;
+  latitude: number;
+  longitude: number;
+}
+
+export default function MonitoringPage() {
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [tripId, setTripId] = useState<string>("");
+  const [monitoredTripId, setMonitoredTripId] = useState<string>("");
+
+  // State untuk menyimpan data lokasi
+  const [lastLocation, setLastLocation] = useState<{
+    lat: number;
+    lon: number;
+  } | null>(null);
+  const [locationHistory, setLocationHistory] = useState<
+    { lat: number; lon: number }[]
+  >([]);
+
+  const [connectionStatus, setConnectionStatus] =
+    useState<string>("Disconnected");
+
+  const BFF_URL = "https://backend-inhan-mobile-production.up.railway.app";
+
+  useEffect(() => {
+    // Inisialisasi koneksi socket
+    const newSocket = io(BFF_URL, {
+      transports: ["websocket"],
+    });
+    setSocket(newSocket);
+
+    newSocket.on("connect", () =>
+      setConnectionStatus(`Connected (ID: ${newSocket.id})`)
+    );
+    newSocket.on("disconnect", () => setConnectionStatus("Disconnected"));
+
+    // Listener untuk event 'locationUpdated'
+    newSocket.on("locationUpdated", (data: LocationData) => {
+      const newPosition = { lat: data.latitude, lon: data.longitude };
+      setLastLocation(newPosition);
+      setLocationHistory((prevHistory) => [...prevHistory, newPosition]);
+    });
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, []);
+
+  const handleJoinRoom = () => {
+    if (socket && tripId) {
+      // Saat join room baru, reset history dan posisi terakhir
+      setLastLocation(null);
+      setLocationHistory([]);
+      socket.emit("joinTripRoom", tripId);
+      setMonitoredTripId(tripId);
+    }
+  };
+
+  const handleLeaveRoom = () => {
+    if (socket && monitoredTripId) {
+      socket.emit("leaveTripRoom", monitoredTripId);
+      setMonitoredTripId("");
+    }
+  };
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100vh",
+        fontFamily: "sans-serif",
+      }}
+    >
+      <header
+        style={{
+          padding: "10px",
+          borderBottom: "1px solid #ccc",
+          background: "#eee",
+        }}
+      >
+        <h1>BFF Real-time Trip Monitor</h1>
+        <p>
+          <strong>Status Koneksi:</strong>
+          <span
+            style={{
+              color: connectionStatus.startsWith("Connected") ? "green" : "red",
+              fontWeight: "bold",
+            }}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            {connectionStatus}
+          </span>
+        </p>
+        <div>
+          <input
+            type="text"
+            value={tripId}
+            onChange={(e) => setTripId(e.target.value)}
+            placeholder="Masukkan Trip ID di sini"
+            style={{ padding: "8px", marginRight: "10px", width: "300px" }}
+          />
+          <button
+            onClick={handleJoinRoom}
+            style={{ padding: "8px 12px", marginRight: "5px" }}
           >
-            Read our docs
-          </a>
+            Pantau Trip
+          </button>
+          <button onClick={handleLeaveRoom} style={{ padding: "8px 12px" }}>
+            Berhenti Pantau
+          </button>
         </div>
+        {monitoredTripId && (
+          <p>
+            <strong>Memantau Trip ID:</strong> {monitoredTripId}
+          </p>
+        )}
+      </header>
+
+      <main style={{ flexGrow: 1 }}>
+        <TripMap
+          lastLocation={lastLocation}
+          locationHistory={locationHistory}
+        />
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
   );
 }
